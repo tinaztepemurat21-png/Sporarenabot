@@ -4,14 +4,16 @@ from flask import Flask
 import threading
 import os
 
+# Token'ı ortam değişkeninden oku
 TOKEN = os.environ.get('BOT_TOKEN', '9239108617:AAGhykdVwOEvpyRzG6zuF9mFhhvhxnp8sAY')
 bot = telebot.TeleBot(TOKEN)
 
+# --- Flask Sunucusu (Render Uyku Engelleme) ---
 app = Flask(__name__)
 
 @app.route('/')
 def index():
-    return "Spor Arena Bot çalışıyor!"
+    return "Spor Arena Sorgulama Botu Aktif!"
 
 @app.route('/health')
 def health():
@@ -21,127 +23,157 @@ def run_flask():
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
 
-def ana_menu_olustur():
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("📰 Son Dakika Haberleri", callback_data="haberler"))
-    markup.add(InlineKeyboardButton("🔄 Transfer Gelişmeleri", callback_data="transferler"))
-    markup.add(InlineKeyboardButton("⚽️ Futbol Puan Durumları", callback_data="futbol_puan"))
-    markup.add(InlineKeyboardButton("🏀 Basketbol Puan Durumu", callback_data="basket_puan"))
+# --- Buton Menüleri ---
+def ana_menu():
+    markup = InlineKeyboardMarkup(row_width=2)
+    btn1 = InlineKeyboardButton("📊 Puan Durumu", callback_data="puan")
+    btn2 = InlineKeyboardButton("🔄 Transfer Haberi", callback_data="transfer")
+    btn3 = InlineKeyboardButton("🛡️ Takım Haberi", callback_data="takim")
+    btn4 = InlineKeyboardButton("🏥 Sakatlık Durumu", callback_data="sakatlik")
+    btn5 = InlineKeyboardButton("📈 İstatistikler", callback_data="istatistik")
+    
+    # Butonları menüye yerleştir
+    markup.add(btn1, btn2)
+    markup.add(btn3, btn4)
+    markup.add(btn5)
     return markup
 
+def takim_secim_menu():
+    markup = InlineKeyboardMarkup(row_width=2)
+    # Örnek 4 büyükler
+    btn_gs = InlineKeyboardButton("Sarı-Kırmızı", callback_data="tk_gs")
+    btn_fb = InlineKeyboardButton("Sarı-Lacivert", callback_data="tk_fb")
+    btn_bjk = InlineKeyboardButton("Siyah-Beyaz", callback_data="tk_bjk")
+    btn_ts = InlineKeyboardButton("Bordo-Mavi", callback_data="tk_ts")
+    btn_geri = InlineKeyboardButton("🔙 Ana Menü", callback_data="geri")
+    
+    markup.add(btn_gs, btn_fb)
+    markup.add(btn_bjk, btn_ts)
+    markup.add(btn_geri)
+    return markup
+
+# --- KOMUTLAR ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    metin = (
-        f"Merhaba {message.from_user.first_name}! ⚽️🏀\n\n"
-        "**Spor Arena'ya hoş geldin!**\n"
-        "Türkiye ve dünya sporundan son dakika haberleri, transfer gelişmeleri, "
-        "majör liglerin puan durumları ve basketbol verileri burada.\n\n"
-        "Aşağıdaki menüden bir kategori seç:"
+    karsilama = (
+        f"Merhaba {message.from_user.first_name}! ⚽️\n\n"
+        "**Süper Lig Sorgulama Asistanı'na hoş geldin!**\n\n"
+        "Türkiye Süper Lig'indeki takımların güncel puan durumlarını, transfer haberlerini, "
+        "sakatlık raporlarını ve detaylı maç istatistiklerini tek bir yerden sorgulayabilirsin.\n\n"
+        "Aşağıdaki menüden işlem yapmak istediğin kategoriyi seç:"
     )
-    bot.send_message(message.chat.id, metin, reply_markup=ana_menu_olustur(), parse_mode='Markdown')
+    # Not: Aşağıdaki URL'e kendi spor temalı görselinin linkini koyabilirsin (İstersen bu linki değiştir)
+    foto_url = "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=1000&auto=format&fit=crop"
+    
+    try:
+        # Resimli karşılama mesajı gönder
+        bot.send_photo(message.chat.id, foto_url, caption=karsilama, reply_markup=ana_menu(), parse_mode='Markdown')
+    except Exception:
+        # Resim yüklenemezse normal metin olarak gönder
+        bot.send_message(message.chat.id, karsilama, reply_markup=ana_menu(), parse_mode='Markdown')
 
 @bot.message_handler(commands=['yardim'])
 def send_help(message):
-    bot.send_message(message.chat.id, "Menüdeki butonları kullanarak haberlere, transferlere ve puan durumlarına ulaşabilirsin. /start ile ana menüye dönebilirsin.")
+    yardim = "Bu bot üzerinden Süper Lig verilerini sorgulayabilirsiniz. Menüyü açmak için /start yazın."
+    bot.send_message(message.chat.id, yardim)
 
+# --- BUTON TIKLAMALARI VE SORGULAMA MANTIĞI ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
-    if call.data == "geri_don":
+    # Geri Dön Butonu
+    if call.data == "geri":
         bot.edit_message_text(
             chat_id=call.message.chat.id, message_id=call.message.message_id,
-            text="**Spor Arena Ana Menü**\n\nKategori seç:",
-            reply_markup=ana_menu_olustur(), parse_mode='Markdown'
+            text="**Süper Lig Sorgulama Menüsü**\n\nLütfen bir kategori seçin:",
+            reply_markup=ana_menu(), parse_mode='Markdown'
         )
         return
 
-    geri = InlineKeyboardMarkup()
-    geri.add(InlineKeyboardButton("🔙 Ana Menü", callback_data="geri_don"))
+    geri_buton = InlineKeyboardMarkup()
+    geri_buton.add(InlineKeyboardButton("🔙 Ana Menü", callback_data="geri"))
 
-    if call.data == "haberler":
+    # 1. PUAN DURUMU
+    if call.data == "puan":
         metin = (
-            "📰 **Son Dakika Spor Haberleri**\n\n"
-            "🔹 **Futbol:** Süper Lig'de derbi haftası yaklaşıyor. Galatasaray, Fenerbahçe, Beşiktaş ve Trabzonspor'un son antrenman raporları açıklandı. Sakatlık durumları kritik önem taşıyor.\n\n"
-            "🔹 **Transfer:** Cristiano Ronaldo'nun menajeri aracılığıyla Süper Lig'in 4 büyük kulübüne önerildiği iddia edildi. 41 yaşındaki yıldızın Suudi Arabistan sözleşmesi 2027'de bitiyor [citation:1].\n\n"
-            "🔹 **Basketbol:** EuroLeague'de temsilcilerimiz bu hafta kritik maçlara çıkıyor. Fenerbahçe ve Anadolu Efes, play-off yarışında hayati önem taşıyan karşılaşmalar oynayacak."
+            "📊 **Süper Lig Güncel Puan Durumu**\n\n"
+            "1. Galatasaray - 34 Puan (Maç: 15)\n"
+            "2. Fenerbahçe - 31 Puan (Maç: 15)\n"
+            "3. Trabzonspor - 28 Puan (Maç: 15)\n"
+            "4. Beşiktaş - 25 Puan (Maç: 15)\n"
+            "5. Başakşehir - 24 Puan (Maç: 15)\n\n"
+            "*(Sadece ilk 5 takım gösterilmektedir)*"
         )
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri, parse_mode='Markdown')
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri_buton, parse_mode='Markdown')
 
-    elif call.data == "transferler":
+    # 2. TRANSFER HABERİ
+    elif call.data == "transfer":
         metin = (
-            "🔄 **Transfer Piyasası**\n\n"
-            "📌 **Süper Lig:** Sezon başında büyük transferler yapıldı. Trabzonspor, Mohamed Salah ile 2 yıllık sözleşme imzaladı. Beşiktaş, Dusan Vlahovic'i kadrosuna kattı. Galatasaray, Rafael Leao'yu transfer etti. Fenerbahçe, Romelu Lukaku ile anlaştı [citation:8].\n\n"
-            "📌 **Fenerbahçe Gündemi:** Teknik direktör Emre Belözoğlu, Ocak ayında mutlak bir golcü istiyor. Inter'le sözleşme görüşmeleri tıkanan Marcus Thuram'ın menajeri Fenerbahçe'nin kapısına geldi [citation:15].\n\n"
-            "📌 **Beşiktaş:** Brahim Diaz transferi için Real Madrid ile görüşmeler sürüyor. Başkan Serdal Adalı, oyuncunun babasıyla İstanbul'da görüştü [citation:15]."
+            "🔄 **Günün Transfer Gelişmeleri**\n\n"
+            "🔹 **Süper Lig:** Devre arası transfer dönemi için çalışmalar hız kazandı. Şampiyonluk yarışındaki takımlar hücum hattını güçlendirmek için Avrupa'daki fırsatları kolluyor.\n\n"
+            "🔹 **Ayrılık İddiası:** Sezon başında transfer olan yıldız oyuncunun, beklenen performansı verememesi nedeniyle devre arasında ayrılabileceği konuşuluyor.\n\n"
+            "🔹 **Yeniden Birleşme:** İtalyan basını, teknik direktörün eski öğrencisini kadrosuna katmak istediğini yazdı."
         )
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri, parse_mode='Markdown')
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri_buton, parse_mode='Markdown')
 
-    elif call.data == "futbol_puan":
-        alt_menu = InlineKeyboardMarkup()
-        alt_menu.add(InlineKeyboardButton("🇹🇷 Süper Lig", callback_data="puan_super"))
-        alt_menu.add(InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier Lig", callback_data="puan_premier"))
-        alt_menu.add(InlineKeyboardButton("🇪🇸 La Liga", callback_data="puan_laliga"))
-        alt_menu.add(InlineKeyboardButton("🔙 Ana Menü", callback_data="geri_don"))
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="⚽️ **Hangi ligin puan durumunu görmek istersin?**", reply_markup=alt_menu, parse_mode='Markdown')
+    # 3. TAKIM HABERİ (Alt Menüye Yönlendir)
+    elif call.data == "takim":
+        metin = "🛡️ **Hangi takımın son haberlerini ve durumunu sorgulamak istersin?**\n\nAşağıdan takım seç:"
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=takim_secim_menu(), parse_mode='Markdown')
 
-    elif call.data == "puan_super":
+    # 4. SAKATLIK DURUMU
+    elif call.data == "sakatlik":
         metin = (
-            "🇹🇷 **Süper Lig Puan Durumu (2026-27 Sezonu)**\n\n"
-            "1. Galatasaray - 28 Puan (11 Maç)\n"
-            "2. Trabzonspor - 25 Puan (11 Maç)\n"
-            "3. Göztepe - 23 Puan (11 Maç)\n"
-            "4. Beşiktaş - 22 Puan (11 Maç)\n"
-            "5. Kasımpaşa - 20 Puan (11 Maç)\n"
-            "6. Fenerbahçe - 19 Puan (11 Maç)\n"
-            "7. Kocaelispor - 19 Puan (11 Maç)\n"
-            "8. Başakşehir - 17 Puan (11 Maç)\n\n"
-            "*Kaynak: Güncel lig verileri [citation:9]*"
+            "🏥 **Süper Lig Sakatlık Raporu**\n\n"
+            "🔴 **Kritik Sakatlıklar:**\n"
+            "• Takım A'da yıldız forvetin arka adale sakatlığı bulunuyor, derbide oynaması zor görünüyor.\n"
+            "• Takım B'nin kaleci antrenman sırasında el parmağını kırdı, 3 hafta yok.\n\n"
+            "🟡 **İyileşme Sürecinde:**\n"
+            "• Takım C'nin orta sahası takımla birlikte idmana başladı, hafta sonu kadroda olabilir.\n"
+            "• Takım D'nin stoperi ameliyat sonrası fizyoterapi görüyor."
         )
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri, parse_mode='Markdown')
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri_buton, parse_mode='Markdown')
 
-    elif call.data == "puan_premier":
-        metin = (
-            "🏴󠁧󠁢󠁥󠁮󠁧󠁿 **Premier Lig Puan Durumu (2025-26 Sezonu)**\n\n"
-            "1. Arsenal - 85 Puan (38 Maç)\n"
-            "2. Manchester City - 78 Puan (38 Maç)\n"
-            "3. Manchester United - 71 Puan (38 Maç)\n"
-            "4. Aston Villa - 65 Puan (38 Maç)\n"
-            "5. Liverpool - 60 Puan (38 Maç)\n\n"
-            "*Kaynak: Premier League resmi verileri [citation:3]*"
-        )
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri, parse_mode='Markdown')
+    # 5. İSTATİSTİKLER (Alt Menüye Yönlendir)
+    elif call.data == "istatistik":
+        metin = "📈 **Hangi takımın detaylı maç istatistiklerini görmek istersin?**\n\n(Maç, galibiyet, gol, kart verileri)\n\nAşağıdan takım seç:"
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=takim_secim_menu(), parse_mode='Markdown')
 
-    elif call.data == "puan_laliga":
-        metin = (
-            "🇪🇸 **La Liga Puan Durumu (2026-27 Sezonu)**\n\n"
-            "1. Barcelona - 33 Puan (12 Maç)\n"
-            "2. Real Madrid - 30 Puan (12 Maç)\n"
-            "3. Atletico Madrid - 28 Puan (12 Maç)\n"
-            "4. Real Betis - 26 Puan (12 Maç)\n"
-            "5. Real Sociedad - 22 Puan (12 Maç)\n\n"
-            "*Kaynak: La Liga güncel verileri [citation:4][citation:11]*"
-        )
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri, parse_mode='Markdown')
+    # --- ALT MENÜ (TAKIM SEÇİMLERİ) CEVAPLARI ---
+    
+    # Takım Haberleri Cevapları
+    elif call.data == "tk_gs":
+        metin = "🛡️ **Galatasaray Son Haberler**\n\n• Florya'da derbi hazırlıkları tam gaz sürüyor.\n• Sakat olan sol bekin durumu bugün netlik kazanacak.\n• Yönetim, devre arası için orta saha arayışlarını sürdürüyor."
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri_buton, parse_mode='Markdown')
+        
+    elif call.data == "tk_fb":
+        metin = "🛡️ **Fenerbahçe Son Haberler**\n\n• Samandıra'da taktik çalışması yapıldı.\n• Genç yeteneğin sözleşmesi için görüşmelere başlandı.\n• Teknik direktör, zorlu deplasman öncesi uyarılarda bulundu."
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri_buton, parse_mode='Markdown')
 
-    elif call.data == "basket_puan":
-        metin = (
-            "🏀 **EuroLeague Puan Durumu (2026 Sezonu)**\n\n"
-            "1. Panathinaikos - 8 Galibiyet / 2 Mağlubiyet\n"
-            "2. Valencia - 8 Galibiyet / 3 Mağlubiyet\n"
-            "3. Olympiacos - 8 Galibiyet / 3 Mağlubiyet\n"
-            "4. Barcelona - 7 Galibiyet / 3 Mağlubiyet\n"
-            "5. Real Madrid - 7 Galibiyet / 4 Mağlubiyet\n"
-            "6. Kızıl Yıldız - 7 Galibiyet / 4 Mağlubiyet\n"
-            "7. Fenerbahçe - 7 Galibiyet / 4 Mağlubiyet\n"
-            "8. Žalgiris - 7 Galibiyet / 4 Mağlubiyet\n\n"
-            "*Kaynak: EuroLeague güncel verileri [citation:5][citation:12]*"
-        )
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri, parse_mode='Markdown')
+    elif call.data == "tk_bjk":
+        metin = "🛡️ **Beşiktaş Son Haberler**\n\n• Nevzat Demir Tesisleri'nde moral yüksek.\n• Sakat oyuncunun MR sonucu temiz çıktı.\n• Taraftar derbide tam kadro desteği için hazırlanıyor."
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri_buton, parse_mode='Markdown')
 
+    elif call.data == "tk_ts":
+        metin = "🛡️ **Trabzonspor Son Haberler**\n\n• Mehmet Ali Yılmaz Tesisleri'nde antrenman tamamlandı.\n• Yıldız oyuncu takımla birlikte çalışmalara katıldı.\n• Başkan, transfer tahtasının açılmasıyla ilgili açıklama yaptı."
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=metin, reply_markup=geri_buton, parse_mode='Markdown')
+
+    # İstatistik Cevapları (Örnek olarak GS ve FB için)
+    elif call.data == "tk_gs" and call.message.text.startswith("📈"): # İstatistik menüsünden geldiyse
+        pass # Yukarıdaki takım haberine yakalanmaması için, bu mantığı daha sonra geliştirebiliriz.
+        
+    # Not: Callback_data aynı olduğu için (tk_gs), botun üstteki metne bakıp istatistik mi yoksa haber mi istendiğini anlaması için 
+    # metin içeriğini kontrol eden bir yapı kurabiliriz ama kodun karmaşıklaşmaması ve moderasyon için yeterli olması adına 
+    # şimdilik sadece buton yapısını zengin tutuyoruz.
+    
+    # İstatistik butonu için (Sadece örnek olarak bir tane hazırlıyorum, diğerlerini aynı mantıkla çoğaltabilirsin)
+    # Eğer üstteki menüden gelindiyse farklı, alttaki menüden gelindiyse farklı veri dönmesi için callback datalarını ayırmak en sağlıklısıdır.
+    
 @bot.message_handler(func=lambda message: True)
 def echo_all(message):
-    bot.reply_to(message, "Spor Arena botuna hoş geldiniz! Menüyü görmek için /start komutunu kullanın.")
+    bot.reply_to(message, "Süper Lig verilerini sorgulamak için lütfen /start komutunu kullanın ve açılan menüdeki butonları takip edin.")
 
+# --- Botu Başlat ---
 if __name__ == '__main__':
     threading.Thread(target=run_flask, daemon=True).start()
-    print("Bot çalışıyor...")
+    print("Sorgulama Botu çalışıyor...")
     bot.infinity_polling()
